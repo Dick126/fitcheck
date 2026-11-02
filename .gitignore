@@ -1,0 +1,10 @@
+server/.venv/
+server/.env
+server/secret.key
+server/fitcheck.db
+server/fitcheck.db-*
+__pycache__/
+*.pyc
+fitcheck-upload.zip
+deploy/.venv/
+.DS_Store

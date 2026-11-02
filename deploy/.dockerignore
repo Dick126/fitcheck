@@ -1,0 +1,10 @@
+# 忽略本地运行文件，避免打进镜像
+server/.venv
+server/__pycache__
+server/*.pyc
+server/.env
+server/fitcheck.db*
+server/secret.key
+deploy/.env
+**/__pycache__
+**/*.pyc

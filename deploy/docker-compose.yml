@@ -1,0 +1,18 @@
+services:
+  fitcheck:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: fitcheck
+    ports:
+      - "80:8000"
+      - "8000:8000"
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - TZ=Asia/Shanghai
+    volumes:
+      - fitcheck-data:/data
+    restart: unless-stopped
+
+volumes:
+  fitcheck-data:
