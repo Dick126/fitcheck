@@ -5,7 +5,7 @@ import time
 
 import paramiko
 
-HOST = os.environ.get("FH", "82.156.164.242")
+HOST = os.environ.get("FH", "")
 PASS = os.environ.get("FP", "")
 CMD = os.environ.get("FCMD", "whoami")
 

@@ -4,7 +4,7 @@ import sys
 
 import paramiko
 
-HOST = os.environ.get("FH", "82.156.164.242")
+HOST = os.environ.get("FH", "")
 PASS = os.environ.get("FP", "")
 LOCAL = os.environ.get("FLOC", "")
 REMOTE = os.environ.get("FREM", "")

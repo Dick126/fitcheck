@@ -11,7 +11,7 @@ import time
 
 import paramiko
 
-HOST = os.environ.get("FH", "82.156.164.242")
+HOST = os.environ.get("FH", "")
 PASS = os.environ.get("FP", "")
 ZIP = os.path.join(os.path.dirname(__file__), "..", "fitcheck-upload.zip")
 ZIP = os.path.abspath(ZIP)
