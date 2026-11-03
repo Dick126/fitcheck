@@ -679,3 +679,36 @@ body.app-auth .main { max-width: 480px; }
   background: #FBFCFD;
 }
 .ex-row input:focus { border-color: var(--primary); outline: none; }
+
+/* ---- 圈内讨论（P0-4） ---- */
+.post-composer { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.post-composer textarea {
+  resize: vertical;
+  min-height: 60px;
+  padding: 10px 12px;
+  border: 1px solid #D8DEE6;
+  border-radius: 10px;
+  font-size: 14px;
+  font-family: inherit;
+}
+.post-card { padding: 10px 0; border-bottom: 1px solid #EEF0F3; }
+.post-card:last-child { border-bottom: none; }
+.post-head { display: flex; align-items: center; gap: 8px; }
+.post-who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.post-who .hint { font-size: 12px; color: #8A93A0; }
+.post-content { margin: 8px 0; font-size: 14px; line-height: 1.6; color: #2A3440; word-break: break-word; }
+.post-foot { display: flex; gap: 10px; align-items: center; }
+.post-comments { margin-top: 8px; padding: 8px; background: #F6F8FA; border-radius: 10px; }
+.cmt-row { display: flex; gap: 8px; padding: 4px 0; align-items: flex-start; }
+.cmt-body { flex: 1; min-width: 0; font-size: 13px; }
+.cmt-body .hint { color: #8A93A0; font-size: 12px; }
+.cmt-body p { margin: 2px 0 0; line-height: 1.5; word-break: break-word; }
+.cmt-input { display: flex; gap: 6px; margin-top: 6px; }
+.cmt-input input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #D8DEE6;
+  border-radius: 8px;
+  font-size: 13px;
+}

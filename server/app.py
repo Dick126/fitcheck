@@ -115,6 +115,27 @@ CREATE TABLE IF NOT EXISTS likes(
   created_at TEXT DEFAULT (datetime('now','localtime')),
   UNIQUE(checkin_id, user_id)
 );
+CREATE TABLE IF NOT EXISTS posts(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  circle_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  content TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS post_likes(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  post_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  created_at TEXT DEFAULT (datetime('now','localtime')),
+  UNIQUE(post_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS post_comments(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  post_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  content TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
 """
 
 
@@ -956,6 +977,209 @@ def circle_members(circle_id: int, authorization: str = Header(default="")):
         })
     con.close()
     return {"ok": True, "data": data}
+
+
+# ---------------- 圈子论坛 ----------------
+class PostIn(BaseModel):
+    content: str
+
+
+def _circle_of_post(con, post_id):
+    return con.execute(
+        "SELECT p.*, c.owner_id, c.name FROM posts p JOIN circles c ON c.id=p.circle_id WHERE p.id=?",
+        (post_id,),
+    ).fetchone()
+
+
+def _post_dict(row, con, me_id):
+    d = dict(row)
+    d["like_count"] = con.execute(
+        "SELECT COUNT(*) FROM post_likes WHERE post_id=?", (d["id"],)
+    ).fetchone()[0]
+    d["liked_by_me"] = bool(con.execute(
+        "SELECT 1 FROM post_likes WHERE post_id=? AND user_id=?", (d["id"], me_id)
+    ).fetchone())
+    d["comment_count"] = con.execute(
+        "SELECT COUNT(*) FROM post_comments WHERE post_id=?", (d["id"],)
+    ).fetchone()[0]
+    return d
+
+
+@app.post("/api/circles/{circle_id}/posts")
+def add_post(circle_id: int, body: PostIn, authorization: str = Header(default="")):
+    user = _current(authorization)
+    con = db()
+    circle = con.execute("SELECT * FROM circles WHERE id=?", (circle_id,)).fetchone()
+    if not circle:
+        con.close()
+        raise HTTPException(404, "圈子不存在")
+    if not con.execute(
+        "SELECT 1 FROM circle_members WHERE circle_id=? AND user_id=?",
+        (circle_id, user["id"]),
+    ).fetchone():
+        con.close()
+        raise HTTPException(403, "加入圈子后才能发帖")
+    content = body.content.strip()
+    if not (1 <= len(content) <= 500):
+        con.close()
+        raise HTTPException(400, "内容需 1–500 字")
+    cur = con.execute(
+        "INSERT INTO posts(circle_id, user_id, content) VALUES (?,?,?)",
+        (circle_id, user["id"], content),
+    )
+    con.commit()
+    row = con.execute(
+        "SELECT p.*, u.nickname FROM posts p JOIN users u ON u.id=p.user_id WHERE p.id=?",
+        (cur.lastrowid,),
+    ).fetchone()
+    data = _post_dict(row, con, user["id"])
+    con.close()
+    return {"ok": True, "data": data}
+
+
+@app.get("/api/circles/{circle_id}/posts")
+def list_posts(circle_id: int, limit: int = 50, authorization: str = Header(default="")):
+    user = _current(authorization)
+    con = db()
+    if not con.execute(
+        "SELECT 1 FROM circle_members WHERE circle_id=? AND user_id=?",
+        (circle_id, user["id"]),
+    ).fetchone():
+        con.close()
+        raise HTTPException(403, "加入圈子后才能查看讨论")
+    rows = con.execute(
+        "SELECT p.*, u.nickname FROM posts p JOIN users u ON u.id=p.user_id "
+        "WHERE p.circle_id=? ORDER BY p.id DESC LIMIT ?",
+        (circle_id, max(1, min(limit, 100))),
+    ).fetchall()
+    data = [_post_dict(r, con, user["id"]) for r in rows]
+    con.close()
+    return {"ok": True, "data": data}
+
+
+@app.delete("/api/posts/{post_id}")
+def del_post(post_id: int, authorization: str = Header(default="")):
+    user = _current(authorization)
+    con = db()
+    post = _circle_of_post(con, post_id)
+    if not post:
+        con.close()
+        raise HTTPException(404, "帖子不存在")
+    if post["user_id"] != user["id"] and post["owner_id"] != user["id"]:
+        con.close()
+        raise HTTPException(403, "只有作者或圈主可以删除")
+    con.execute("DELETE FROM post_comments WHERE post_id=?", (post_id,))
+    con.execute("DELETE FROM post_likes WHERE post_id=?", (post_id,))
+    con.execute("DELETE FROM posts WHERE id=?", (post_id,))
+    con.commit()
+    con.close()
+    return {"ok": True, "data": None}
+
+
+@app.post("/api/posts/{post_id}/like")
+def like_post(post_id: int, authorization: str = Header(default="")):
+    user = _current(authorization)
+    con = db()
+    post = _circle_of_post(con, post_id)
+    if not post:
+        con.close()
+        raise HTTPException(404, "帖子不存在")
+    if not con.execute(
+        "SELECT 1 FROM circle_members WHERE circle_id=? AND user_id=?",
+        (post["circle_id"], user["id"]),
+    ).fetchone():
+        con.close()
+        raise HTTPException(403, "加入圈子后才能点赞")
+    con.execute(
+        "INSERT OR IGNORE INTO post_likes(post_id, user_id) VALUES (?,?)",
+        (post_id, user["id"]),
+    )
+    con.commit()
+    count = con.execute("SELECT COUNT(*) FROM post_likes WHERE post_id=?", (post_id,)).fetchone()[0]
+    con.close()
+    return {"ok": True, "data": {"likes": count, "liked_by_me": True}}
+
+
+@app.delete("/api/posts/{post_id}/like")
+def unlike_post(post_id: int, authorization: str = Header(default="")):
+    user = _current(authorization)
+    con = db()
+    con.execute("DELETE FROM post_likes WHERE post_id=? AND user_id=?", (post_id, user["id"]))
+    con.commit()
+    count = con.execute("SELECT COUNT(*) FROM post_likes WHERE post_id=?", (post_id,)).fetchone()[0]
+    con.close()
+    return {"ok": True, "data": {"likes": count, "liked_by_me": False}}
+
+
+@app.post("/api/posts/{post_id}/comments")
+def add_comment(post_id: int, body: PostIn, authorization: str = Header(default="")):
+    user = _current(authorization)
+    con = db()
+    post = _circle_of_post(con, post_id)
+    if not post:
+        con.close()
+        raise HTTPException(404, "帖子不存在")
+    if not con.execute(
+        "SELECT 1 FROM circle_members WHERE circle_id=? AND user_id=?",
+        (post["circle_id"], user["id"]),
+    ).fetchone():
+        con.close()
+        raise HTTPException(403, "加入圈子后才能评论")
+    content = body.content.strip()
+    if not (1 <= len(content) <= 300):
+        con.close()
+        raise HTTPException(400, "评论需 1–300 字")
+    cur = con.execute(
+        "INSERT INTO post_comments(post_id, user_id, content) VALUES (?,?,?)",
+        (post_id, user["id"], content),
+    )
+    con.commit()
+    row = con.execute(
+        "SELECT c.*, u.nickname FROM post_comments c JOIN users u ON u.id=c.user_id WHERE c.id=?",
+        (cur.lastrowid,),
+    ).fetchone()
+    con.close()
+    return {"ok": True, "data": dict(row)}
+
+
+@app.get("/api/posts/{post_id}/comments")
+def list_comments(post_id: int, authorization: str = Header(default="")):
+    user = _current(authorization)
+    con = db()
+    post = _circle_of_post(con, post_id)
+    if not post:
+        con.close()
+        raise HTTPException(404, "帖子不存在")
+    rows = con.execute(
+        "SELECT c.*, u.nickname FROM post_comments c JOIN users u ON u.id=c.user_id "
+        "WHERE c.post_id=? ORDER BY c.id",
+        (post_id,),
+    ).fetchall()
+    con.close()
+    return {"ok": True, "data": [dict(r) for r in rows]}
+
+
+@app.delete("/api/comments/{comment_id}")
+def del_comment(comment_id: int, authorization: str = Header(default="")):
+    user = _current(authorization)
+    con = db()
+    row = con.execute(
+        "SELECT c.*, cr.owner_id FROM post_comments c "
+        "JOIN posts p ON p.id=c.post_id "
+        "JOIN circles cr ON cr.id=p.circle_id "
+        "WHERE c.id=?",
+        (comment_id,),
+    ).fetchone()
+    if not row:
+        con.close()
+        raise HTTPException(404, "评论不存在")
+    if row["user_id"] != user["id"] and row["owner_id"] != user["id"]:
+        con.close()
+        raise HTTPException(403, "只有作者或圈主可以删除")
+    con.execute("DELETE FROM post_comments WHERE id=?", (comment_id,))
+    con.commit()
+    con.close()
+    return {"ok": True, "data": None}
 
 
 # ---------------- 动态 / 排行 / 点赞 ----------------

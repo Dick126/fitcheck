@@ -112,10 +112,12 @@
       Promise.all([
         API.get('/circles/' + id + '/members'),
         API.get('/circles/' + id + '/leaderboard?days=7'),
+        API.get('/auth/me'),
       ]).then(function (res) {
         if (!App.isCurrent(seq)) return;
         const circle = state.circles.find(function (c) { return c.id === id; }) || {};
-        renderDetail(box, circle, res[0] || [], res[1] || []);
+        const meId = res[2] && res[2].user ? res[2].user.id : null;
+        renderDetail(box, circle, res[0] || [], res[1] || [], meId);
       }).catch(function (err) {
         if (!App.isCurrent(seq)) return;
         if (err && err.authHandled) return;
@@ -123,7 +125,7 @@
       });
     }
 
-    function renderDetail(box, circle, members, board) {
+    function renderDetail(box, circle, members, board, meId) {
       const medals = ['🥇', '🥈', '🥉'];
       const isOwner = !!circle.is_owner;
       let html = '<section class="card"><div class="card-head"><h3>👥 圈友（' + members.length + '）</h3>' +
@@ -172,7 +174,14 @@
         });
       }
       html += '</section>';
+
+      html += '<section class="card"><div class="card-head"><h3>💬 圈内讨论</h3>' +
+        '<span class="card-sub">分享心得、提问交流</span></div>' +
+        '<div id="circle-posts"></div></section>';
+
       box.innerHTML = html;
+
+      renderPosts(box, circle, meId);
 
       // ---- 管理操作绑定 ----
       box.querySelectorAll('[data-kick]').forEach(function (btn) {
@@ -290,6 +299,174 @@
       btn.classList.toggle('liked', !!liked);
       btn.innerHTML = (liked ? '❤️' : '🤍') + ' ' + count;
       btn.disabled = false;
+    }
+
+    /* ---------- 圈内讨论（论坛） ---------- */
+    function fmtTime(s) {
+      return String(s || '').replace('T', ' ').slice(5, 16);
+    }
+    function escNl(s) {
+      return App.esc(s).replace(/\n/g, '<br>');
+    }
+
+    function renderPosts(box, circle, meId) {
+      const postsBox = box.querySelector('#circle-posts');
+      if (!postsBox) return;
+      API.get('/circles/' + circle.id + '/posts').then(function (posts) {
+        if (!App.isCurrent(seq)) return;
+        let html = '<div class="post-composer">' +
+          '<textarea id="post-text" rows="2" maxlength="500" placeholder="分享今天的训练心得、提问或立个 flag…"></textarea>' +
+          '<button type="button" class="btn btn-primary" id="post-send">发布</button></div>';
+        if (!posts || !posts.length) {
+          html += '<div class="empty"><p>还没有帖子，来发第一帖吧</p></div>';
+        } else {
+          html += '<div class="post-list">';
+          posts.forEach(function (p) { html += postCard(p, circle, meId); });
+          html += '</div>';
+        }
+        postsBox.innerHTML = html;
+        bindPosts(postsBox, circle, meId);
+      }).catch(function (err) {
+        if (err && err.authHandled) return;
+      });
+    }
+
+    function postCard(p, circle, meId) {
+      const canDel = (p.user_id === meId) || !!circle.is_owner;
+      return '<div class="post-card" data-id="' + p.id + '">' +
+        '<div class="post-head"><span class="avatar">' + App.esc(String(p.nickname || '?').slice(0, 1)) + '</span>' +
+        '<div class="post-who"><b>' + App.esc(p.nickname || '圈友') + '</b>' +
+        '<span class="hint">' + fmtTime(p.created_at) + '</span></div>' +
+        (canDel ? '<button type="button" class="btn btn-ghost btn-mini post-del" data-id="' + p.id + '">删除</button>' : '') +
+        '</div>' +
+        '<p class="post-content">' + escNl(p.content || '') + '</p>' +
+        '<div class="post-foot">' +
+        '<button type="button" class="like-btn' + (p.liked_by_me ? ' liked' : '') + '" data-id="' + p.id + '" data-liked="' + (p.liked_by_me ? 1 : 0) + '">' +
+        (p.liked_by_me ? '❤️' : '🤍') + ' ' + (p.like_count || 0) + '</button>' +
+        '<button type="button" class="btn btn-ghost btn-mini cmt-toggle" data-id="' + p.id + '">💬 ' + (p.comment_count || 0) + '</button>' +
+        '</div>' +
+        '<div class="post-comments" data-id="' + p.id + '" hidden></div>' +
+        '</div>';
+    }
+
+    function renderComments(postsBox, postId, circle, meId) {
+      API.get('/posts/' + postId + '/comments').then(function (cs) {
+        if (!App.isCurrent(seq)) return;
+        const target = postsBox.querySelector('.post-comments[data-id="' + postId + '"]');
+        if (!target) return;
+        let h = '<div class="cmt-list">';
+        cs.forEach(function (c) {
+          const canDel = (c.user_id === meId) || !!circle.is_owner;
+          h += '<div class="cmt-row"><span class="avatar">' + App.esc(String(c.nickname || '?').slice(0, 1)) + '</span>' +
+            '<div class="cmt-body"><b>' + App.esc(c.nickname || '') + '</b>' +
+            '<span class="hint"> ' + fmtTime(c.created_at) + '</span>' +
+            (canDel ? '<button type="button" class="btn btn-ghost btn-mini cmt-del" data-id="' + c.id + '">删除</button>' : '') +
+            '<p>' + escNl(c.content || '') + '</p></div></div>';
+        });
+        if (!cs.length) h += '<p class="hint">还没有评论</p>';
+        h += '</div><div class="cmt-input">' +
+          '<input id="cmt-text-' + postId + '" maxlength="300" placeholder="写评论…">' +
+          '<button type="button" class="btn btn-primary btn-mini cmt-send" data-id="' + postId + '">发送</button></div>';
+        target.innerHTML = h;
+      }).catch(function (err) {
+        if (err && err.authHandled) return;
+      });
+    }
+
+    function bindPosts(postsBox, circle, meId) {
+      const sendBtn = document.getElementById('post-send');
+      if (sendBtn) sendBtn.addEventListener('click', function () {
+        const ta = document.getElementById('post-text');
+        const content = ta.value.trim();
+        if (!content) { App.toast('写点内容再发布吧', 'error'); return; }
+        sendBtn.disabled = true;
+        API.post('/circles/' + circle.id + '/posts', { content: content }).then(function () {
+          App.toast('已发布', 'success');
+          App.refresh();
+        }).catch(function (err) {
+          if (err && err.authHandled) return;
+          App.toast(err.message || '发布失败', 'error');
+          sendBtn.disabled = false;
+        });
+      });
+
+      postsBox.addEventListener('click', function (e) {
+        const likeBtn = e.target.closest('.like-btn');
+        if (likeBtn) {
+          const pid = parseInt(likeBtn.getAttribute('data-id'), 10);
+          const liked = likeBtn.getAttribute('data-liked') === '1';
+          const action = liked ? API.del('/posts/' + pid + '/like') : API.post('/posts/' + pid + '/like', {});
+          action.then(function (data) {
+            likeBtn.setAttribute('data-liked', data.liked_by_me ? '1' : '0');
+            likeBtn.classList.toggle('liked', !!data.liked_by_me);
+            likeBtn.innerHTML = (data.liked_by_me ? '❤️' : '🤍') + ' ' + data.likes;
+          }).catch(function (err) {
+            if (err && err.authHandled) return;
+            App.toast(err.message || '操作失败', 'error');
+          });
+          return;
+        }
+
+        const cmtToggle = e.target.closest('.cmt-toggle');
+        if (cmtToggle) {
+          const pid = parseInt(cmtToggle.getAttribute('data-id'), 10);
+          const target = postsBox.querySelector('.post-comments[data-id="' + pid + '"]');
+          if (target.hidden) {
+            target.hidden = false;
+            renderComments(postsBox, pid, circle, meId);
+          } else {
+            target.hidden = true;
+          }
+          return;
+        }
+
+        const cmtSend = e.target.closest('.cmt-send');
+        if (cmtSend) {
+          const pid = parseInt(cmtSend.getAttribute('data-id'), 10);
+          const input = document.getElementById('cmt-text-' + pid);
+          const content = (input ? input.value : '').trim();
+          if (!content) { App.toast('写点内容再发送吧', 'error'); return; }
+          API.post('/posts/' + pid + '/comments', { content: content }).then(function () {
+            const tgl = postsBox.querySelector('.cmt-toggle[data-id="' + pid + '"]');
+            if (tgl) {
+              const m = tgl.textContent.match(/\d+/);
+              tgl.textContent = '💬 ' + ((m ? parseInt(m[0], 10) : 0) + 1);
+            }
+            renderComments(postsBox, pid, circle, meId);
+            App.toast('评论已发送', 'success');
+          }).catch(function (err) {
+            if (err && err.authHandled) return;
+            App.toast(err.message || '发送失败', 'error');
+          });
+          return;
+        }
+
+        const cmtDel = e.target.closest('.cmt-del');
+        if (cmtDel) {
+          if (!confirm('删除这条评论？')) return;
+          API.del('/comments/' + cmtDel.getAttribute('data-id')).then(function () {
+            const pid = cmtDel.closest('.post-comments').getAttribute('data-id');
+            renderComments(postsBox, parseInt(pid, 10), circle, meId);
+            App.toast('已删除', 'success');
+          }).catch(function (err) {
+            if (err && err.authHandled) return;
+            App.toast(err.message || '删除失败', 'error');
+          });
+          return;
+        }
+
+        const postDel = e.target.closest('.post-del');
+        if (postDel) {
+          if (!confirm('删除这条帖子（含评论）？')) return;
+          API.del('/posts/' + postDel.getAttribute('data-id')).then(function () {
+            App.toast('已删除', 'success');
+            App.refresh();
+          }).catch(function (err) {
+            if (err && err.authHandled) return;
+            App.toast(err.message || '删除失败', 'error');
+          });
+        }
+      });
     }
 
     function feedCard(c) {
