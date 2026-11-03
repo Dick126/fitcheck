@@ -3,6 +3,7 @@ server/.env
 server/secret.key
 server/fitcheck.db
 server/fitcheck.db-*
+deploy/.env
 __pycache__/
 *.pyc
 fitcheck-upload.zip
