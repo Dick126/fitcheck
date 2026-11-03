@@ -47,6 +47,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def no_cache_html(request, call_next):
+    """HTML 不缓存，保证前端更新后手机刷新即生效；静态资源靠 ?v= 版本号。"""
+    resp = await call_next(request)
+    ctype = resp.headers.get("content-type", "")
+    if "text/html" in ctype:
+        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return resp
+
 # ---------------- 数据库 ----------------
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users(
