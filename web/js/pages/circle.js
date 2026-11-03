@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   const Pages = (window.Pages = window.Pages || {});
-  const state = { selectedId: null, seq: 0 };
+  const state = { selectedId: null, seq: 0, circles: [] };
 
   Pages.circle = function (container) {
     const seq = App.beginRender();
@@ -57,6 +57,7 @@
     function loadCircles() {
       API.get('/circles/mine').then(function (circles) {
         if (!App.isCurrent(seq)) return;
+        state.circles = circles || [];
         const listBox = document.getElementById('circle-list');
         if (!circles || !circles.length) {
           listBox.innerHTML = '<div class="empty"><p>还没有圈子，创建或加入一个吧</p></div>';
@@ -113,7 +114,8 @@
         API.get('/circles/' + id + '/leaderboard?days=7'),
       ]).then(function (res) {
         if (!App.isCurrent(seq)) return;
-        renderDetail(box, res[0] || [], res[1] || []);
+        const circle = state.circles.find(function (c) { return c.id === id; }) || {};
+        renderDetail(box, circle, res[0] || [], res[1] || []);
       }).catch(function (err) {
         if (!App.isCurrent(seq)) return;
         if (err && err.authHandled) return;
@@ -121,20 +123,40 @@
       });
     }
 
-    function renderDetail(box, members, board) {
+    function renderDetail(box, circle, members, board) {
       const medals = ['🥇', '🥈', '🥉'];
-      let html = '<section class="card"><div class="card-head"><h3>👥 圈友（' + members.length + '）</h3></div>';
+      const isOwner = !!circle.is_owner;
+      let html = '<section class="card"><div class="card-head"><h3>👥 圈友（' + members.length + '）</h3>' +
+        '<span class="card-sub">' + (isOwner ? '你是圈主' : '成员') + '</span></div>';
+      if (circle.notice) {
+        html += '<p class="circle-notice">📢 ' + App.esc(circle.notice) + '</p>';
+      }
       if (!members.length) {
         html += '<div class="empty"><p>暂无成员</p></div>';
       } else {
-        html += '<div class="member-chips">';
+        html += '<div class="member-list">';
         members.forEach(function (m) {
-          html += '<span class="member-chip">' + App.esc(String(m.nickname || '?').slice(0, 1)) + '</span>' +
-            '<span class="member-name">' + App.esc(m.nickname || '圈友') + (m.is_owner ? ' 👑' : '') + '</span>';
+          html += '<div class="member-row">' +
+            '<span class="avatar">' + App.esc(String(m.nickname || '?').slice(0, 1)) + '</span>' +
+            '<div class="member-who"><b>' + App.esc(m.nickname || '圈友') + (m.is_owner ? ' 👑' : '') + '</b>' +
+            '<span class="hint">' + (m.today_done ? '✅ 今日已打卡' : '⏳ 今日未打卡') + '</span></div>' +
+            (isOwner && !m.is_owner
+              ? '<button type="button" class="btn btn-ghost btn-mini" data-kick="' + m.user_id + '">移除</button>'
+              : '') +
+            '</div>';
         });
         html += '</div>';
       }
-      html += '</section><section class="card"><div class="card-head"><h3>🏆 七日排行榜</h3>' +
+      html += '<div class="circle-actions">';
+      if (isOwner) {
+        html += '<button type="button" class="btn btn-ghost" id="circle-edit">✏️ 编辑名称/公告</button>' +
+          '<button type="button" class="btn btn-danger" id="circle-dissolve">解散圈子</button>';
+      } else {
+        html += '<button type="button" class="btn btn-danger" id="circle-leave">退出圈子</button>';
+      }
+      html += '</div></section>';
+
+      html += '<section class="card"><div class="card-head"><h3>🏆 七日排行榜</h3>' +
         '<span class="card-sub">按完成次数排序</span></div>';
       const list = board.slice().sort(function (a, b) {
         return (b.done_count || 0) - (a.done_count || 0) || (b.streak || 0) - (a.streak || 0);
@@ -151,6 +173,77 @@
       }
       html += '</section>';
       box.innerHTML = html;
+
+      // ---- 管理操作绑定 ----
+      box.querySelectorAll('[data-kick]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          const uid = parseInt(btn.getAttribute('data-kick'), 10);
+          const nickEl = btn.closest('.member-row').querySelector('b');
+          const nick = nickEl ? nickEl.textContent : '该成员';
+          if (!confirm('确定把 ' + nick + ' 移出圈子吗？')) return;
+          API.del('/circles/' + circle.id + '/members/' + uid).then(function () {
+            App.toast('已移除', 'success');
+            App.refresh();
+          }).catch(function (err) {
+            if (err && err.authHandled) return;
+            App.toast(err.message || '操作失败', 'error');
+          });
+        });
+      });
+
+      const editBtn = document.getElementById('circle-edit');
+      if (editBtn) editBtn.addEventListener('click', function () { openEditModal(circle); });
+
+      const leaveBtn = document.getElementById('circle-leave');
+      if (leaveBtn) leaveBtn.addEventListener('click', function () {
+        if (!confirm('退出后需邀请码才能重新加入，确定退出吗？')) return;
+        API.post('/circles/' + circle.id + '/leave', {}).then(function () {
+          App.toast('已退出圈子', 'success');
+          App.refresh();
+        }).catch(function (err) {
+          if (err && err.authHandled) return;
+          App.toast(err.message || '退出失败', 'error');
+        });
+      });
+
+      const dissolveBtn = document.getElementById('circle-dissolve');
+      if (dissolveBtn) dissolveBtn.addEventListener('click', function () {
+        if (!confirm('解散后所有成员退出圈子（各自打卡记录保留），确定解散吗？')) return;
+        API.del('/circles/' + circle.id).then(function () {
+          App.toast('圈子已解散', 'success');
+          App.refresh();
+        }).catch(function (err) {
+          if (err && err.authHandled) return;
+          App.toast(err.message || '解散失败', 'error');
+        });
+      });
+    }
+
+    function openEditModal(circle) {
+      const modal = App.openModal(
+        '<h3>编辑圈子</h3>' +
+        '<form id="ce-form" class="form-grid">' +
+        '<div class="field field-full"><label for="ce-name">圈子名称</label>' +
+        '<input id="ce-name" maxlength="24" value="' + App.esc(circle.name || '') + '"></div>' +
+        '<div class="field field-full"><label for="ce-notice">公告（可为空，最多 100 字）</label>' +
+        '<textarea id="ce-notice" rows="3" maxlength="100">' + App.esc(circle.notice || '') + '</textarea></div>' +
+        '<div class="field field-full"><button class="btn btn-primary btn-block" type="submit">保存</button></div>' +
+        '</form>'
+      );
+      modal.querySelector('#ce-form').addEventListener('submit', function (e) {
+        e.preventDefault();
+        API.put('/circles/' + circle.id, {
+          name: modal.querySelector('#ce-name').value.trim(),
+          notice: modal.querySelector('#ce-notice').value.trim(),
+        }).then(function () {
+          App.closeModal();
+          App.toast('已保存', 'success');
+          App.refresh();
+        }).catch(function (err) {
+          if (err && err.authHandled) return;
+          App.toast(err.message || '保存失败', 'error');
+        });
+      });
     }
 
     /* ---------- 好友动态 ---------- */

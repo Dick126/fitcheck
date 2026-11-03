@@ -125,6 +125,9 @@ def init_db():
     cols = [r[1] for r in con.execute("PRAGMA table_info(profiles)")]
     if "api_key" not in cols:
         con.execute("ALTER TABLE profiles ADD COLUMN api_key TEXT DEFAULT ''")
+    cols = [r[1] for r in con.execute("PRAGMA table_info(circles)")]
+    if "notice" not in cols:
+        con.execute("ALTER TABLE circles ADD COLUMN notice TEXT DEFAULT ''")
     con.commit()
     con.close()
 
@@ -724,17 +727,19 @@ def del_checkin(checkin_id: int, authorization: str = Header(default="")):
 # ---------------- 圈子 ----------------
 class CircleIn(BaseModel):
     name: str = "健身小圈子"
+    notice: str | None = None
 
 
 @app.post("/api/circles")
 def create_circle(body: CircleIn | None = None, authorization: str = Header(default="")):
     user = _current(authorization)
     name = (body.name.strip() if body and body.name and body.name.strip() else "健身小圈子")
+    notice = (body.notice.strip() if body and body.notice and body.notice.strip() else "")
     con = db()
     code = secrets.token_hex(3).upper()
     cur = con.execute(
-        "INSERT INTO circles(name, invite_code, owner_id) VALUES (?,?,?)",
-        (name, code, user["id"]),
+        "INSERT INTO circles(name, invite_code, owner_id, notice) VALUES (?,?,?,?)",
+        (name, code, user["id"], notice),
     )
     con.execute(
         "INSERT OR IGNORE INTO circle_members(circle_id, user_id, role) VALUES (?,?,?)",
@@ -764,6 +769,100 @@ def join_circle(body: dict, authorization: str = Header(default="")):
     con.commit()
     con.close()
     return {"ok": True, "data": {"id": circle["id"], "name": circle["name"]}}
+
+
+@app.put("/api/circles/{circle_id}")
+def edit_circle(circle_id: int, body: CircleIn, authorization: str = Header(default="")):
+    user = _current(authorization)
+    con = db()
+    circle = con.execute("SELECT * FROM circles WHERE id=?", (circle_id,)).fetchone()
+    if not circle:
+        con.close()
+        raise HTTPException(404, "圈子不存在")
+    if circle["owner_id"] != user["id"]:
+        con.close()
+        raise HTTPException(403, "只有圈主可以修改圈子")
+    name = (body.name.strip() if body.name and body.name.strip() else circle["name"])
+    notice = (body.notice.strip() if body.notice is not None and body.notice.strip() else "")
+    con.execute(
+        "UPDATE circles SET name=?, notice=? WHERE id=?",
+        (name, notice, circle_id),
+    )
+    con.commit()
+    row = con.execute("SELECT * FROM circles WHERE id=?", (circle_id,)).fetchone()
+    con.close()
+    return {"ok": True, "data": dict(row)}
+
+
+@app.post("/api/circles/{circle_id}/leave")
+def leave_circle(circle_id: int, authorization: str = Header(default="")):
+    user = _current(authorization)
+    con = db()
+    circle = con.execute("SELECT * FROM circles WHERE id=?", (circle_id,)).fetchone()
+    if not circle:
+        con.close()
+        raise HTTPException(404, "圈子不存在")
+    if circle["owner_id"] == user["id"]:
+        con.close()
+        raise HTTPException(403, "圈主不能直接退出，可解散圈子")
+    cur = con.execute(
+        "DELETE FROM circle_members WHERE circle_id=? AND user_id=?",
+        (circle_id, user["id"]),
+    )
+    if cur.rowcount == 0:
+        con.close()
+        raise HTTPException(404, "你不在这个圈子里")
+    left = con.execute(
+        "SELECT COUNT(*) FROM circle_members WHERE circle_id=?", (circle_id,)
+    ).fetchone()[0]
+    if left == 0:
+        con.execute("DELETE FROM circles WHERE id=?", (circle_id,))
+    con.commit()
+    con.close()
+    return {"ok": True, "data": None}
+
+
+@app.delete("/api/circles/{circle_id}/members/{target_id}")
+def remove_member(circle_id: int, target_id: int, authorization: str = Header(default="")):
+    user = _current(authorization)
+    con = db()
+    circle = con.execute("SELECT * FROM circles WHERE id=?", (circle_id,)).fetchone()
+    if not circle:
+        con.close()
+        raise HTTPException(404, "圈子不存在")
+    if circle["owner_id"] != user["id"]:
+        con.close()
+        raise HTTPException(403, "只有圈主可以移除成员")
+    if target_id == circle["owner_id"]:
+        con.close()
+        raise HTTPException(400, "不能移除圈主")
+    cur = con.execute(
+        "DELETE FROM circle_members WHERE circle_id=? AND user_id=?",
+        (circle_id, target_id),
+    )
+    con.commit()
+    con.close()
+    if cur.rowcount == 0:
+        raise HTTPException(404, "该成员不在圈子里")
+    return {"ok": True, "data": None}
+
+
+@app.delete("/api/circles/{circle_id}")
+def dissolve_circle(circle_id: int, authorization: str = Header(default="")):
+    user = _current(authorization)
+    con = db()
+    circle = con.execute("SELECT * FROM circles WHERE id=?", (circle_id,)).fetchone()
+    if not circle:
+        con.close()
+        raise HTTPException(404, "圈子不存在")
+    if circle["owner_id"] != user["id"]:
+        con.close()
+        raise HTTPException(403, "只有圈主可以解散圈子")
+    con.execute("DELETE FROM circle_members WHERE circle_id=?", (circle_id,))
+    con.execute("DELETE FROM circles WHERE id=?", (circle_id,))
+    con.commit()
+    con.close()
+    return {"ok": True, "data": None}
 
 
 @app.get("/api/circles/mine")
@@ -802,8 +901,19 @@ def circle_members(circle_id: int, authorization: str = Header(default="")):
         "JOIN users u ON u.id=cm.user_id WHERE cm.circle_id=? ORDER BY cm.joined_at",
         (circle_id,),
     ).fetchall()
-    data = [{"user_id": r["user_id"], "nickname": r["nickname"],
-             "is_owner": r["role"] == "owner"} for r in rows]
+    today = date.today().isoformat()
+    data = []
+    for r in rows:
+        done = con.execute(
+            "SELECT 1 FROM checkins WHERE user_id=? AND date=? AND status='done'",
+            (r["user_id"], today),
+        ).fetchone()
+        data.append({
+            "user_id": r["user_id"],
+            "nickname": r["nickname"],
+            "is_owner": r["role"] == "owner",
+            "today_done": bool(done),
+        })
     con.close()
     return {"ok": True, "data": data}
 
