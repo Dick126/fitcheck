@@ -597,6 +597,46 @@ def current_plan(authorization: str = Header(default="")):
     return {"ok": True, "data": json.loads(row["payload"]) if row else None}
 
 
+class PlanUpdateIn(BaseModel):
+    days: list | None = None
+    diet: dict | None = None
+    coach_note: str | None = None
+    goal: str | None = None
+
+
+@app.put("/api/plans/current")
+def update_plan(body: PlanUpdateIn, authorization: str = Header(default="")):
+    user = _current(authorization)
+    con = db()
+    row = con.execute(
+        "SELECT payload FROM plans WHERE user_id=? ORDER BY id DESC LIMIT 1",
+        (user["id"],),
+    ).fetchone()
+    if not row:
+        con.close()
+        raise HTTPException(404, "还没有计划，请先生成")
+    plan = json.loads(row["payload"])
+    if body.days is not None:
+        if not isinstance(body.days, list):
+            con.close()
+            raise HTTPException(400, "days 格式不正确")
+        plan["days"] = body.days
+    if body.diet is not None:
+        plan["diet"] = {**(plan.get("diet") or {}), **body.diet}
+    if body.coach_note is not None:
+        plan["coach_note"] = body.coach_note
+    if body.goal is not None:
+        plan["goal"] = body.goal
+    con.execute(
+        "INSERT INTO plans(user_id, week_start, goal, payload) VALUES (?,?,?,?)",
+        (user["id"], plan.get("week_start", ""), plan.get("goal", ""),
+         json.dumps(plan, ensure_ascii=False)),
+    )
+    con.commit()
+    con.close()
+    return {"ok": True, "data": plan}
+
+
 # ---------------- 打卡 ----------------
 class CheckinIn(BaseModel):
     date: str

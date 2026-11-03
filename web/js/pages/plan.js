@@ -90,7 +90,8 @@
       const isRest = !day.exercises || !day.exercises.length;
       html += '<section class="card day-card">' +
         '<div class="card-head"><h3>' + App.esc(day.title || ('第 ' + day.index + ' 天')) + '</h3>' +
-        (isRest ? '<span class="badge badge-rest">休息</span>' : '') + '</div>';
+        (isRest ? '<span class="badge badge-rest">休息</span>' : '') +
+        '<button type="button" class="btn btn-ghost btn-mini day-edit" data-idx="' + day.index + '">✏️ 编辑</button></div>';
       if (!isRest && day.warmup) {
         html += '<div class="warmup"><b>热身：</b>' + App.esc(day.warmup) + '</div>';
       }
@@ -123,6 +124,86 @@
         App.toast(err.message || '生成失败', 'error');
         btn.disabled = false;
         btn.textContent = '🔄 重新生成';
+      });
+    });
+
+    container.querySelectorAll('.day-edit').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const idx = parseInt(btn.getAttribute('data-idx'), 10);
+        const day = (plan.days || []).find(function (d) { return d.index === idx; });
+        if (day) openDayEdit(plan, day);
+      });
+    });
+  }
+
+  /* ---------- 编辑某一天 ---------- */
+  function exRowHTML(ex) {
+    ex = ex || {};
+    return '<div class="ex-row">' +
+      '<input class="ex-name" placeholder="动作名" value="' + App.esc(ex.name || '') + '">' +
+      '<input class="ex-equip" placeholder="器械" value="' + App.esc(ex.equipment || '') + '">' +
+      '<input class="ex-sets" placeholder="4×8" value="' + App.esc(ex.sets || '') + '">' +
+      '<input class="ex-rest" placeholder="90s" value="' + App.esc(ex.rest || '') + '">' +
+      '<input class="ex-note" placeholder="要点" value="' + App.esc(ex.note || '') + '">' +
+      '<button type="button" class="btn btn-danger btn-mini ex-del">✕</button></div>';
+  }
+
+  function openDayEdit(plan, day) {
+    const modal = App.openModal(
+      '<h3>编辑 · ' + App.esc(day.title || '') + '</h3>' +
+      '<form id="de-form" class="form-grid">' +
+      '<div class="field field-full"><label for="de-warmup">热身说明（可空）</label>' +
+      '<textarea id="de-warmup" rows="2">' + App.esc(day.warmup || '') + '</textarea></div>' +
+      '<div class="field field-full"><label>动作列表</label></div>' +
+      '<div id="de-list">' +
+      ((day.exercises || []).map(exRowHTML).join('') || exRowHTML()) +
+      '</div>' +
+      '<div class="field field-full"><button type="button" class="btn btn-ghost btn-block" id="de-add">＋ 添加动作</button></div>' +
+      '<div class="field field-full"><button class="btn btn-primary btn-block" type="submit">保存这一天</button></div>' +
+      '</form>'
+    );
+
+    const listBox = modal.querySelector('#de-list');
+    modal.querySelector('#de-add').addEventListener('click', function () {
+      const div = document.createElement('div');
+      div.innerHTML = exRowHTML();
+      listBox.appendChild(div.firstElementChild);
+    });
+    listBox.addEventListener('click', function (e) {
+      const del = e.target.closest('.ex-del');
+      if (!del) return;
+      if (listBox.querySelectorAll('.ex-row').length <= 1) {
+        App.toast('至少保留一行（可留空保存）', 'error');
+        return;
+      }
+      del.closest('.ex-row').remove();
+    });
+
+    modal.querySelector('#de-form').addEventListener('submit', function (e) {
+      e.preventDefault();
+      const items = [];
+      listBox.querySelectorAll('.ex-row').forEach(function (row) {
+        const name = row.querySelector('.ex-name').value.trim();
+        const equipment = row.querySelector('.ex-equip').value.trim();
+        const sets = row.querySelector('.ex-sets').value.trim();
+        const rest = row.querySelector('.ex-rest').value.trim();
+        const note = row.querySelector('.ex-note').value.trim();
+        if (!name && !equipment && !sets && !note) return;
+        items.push({ name: name || '未命名动作', equipment: equipment, sets: sets, rest: rest, note: note });
+      });
+      const warmup = modal.querySelector('#de-warmup').value.trim();
+      const dayIdx = day.index;
+      const newDays = (plan.days || []).map(function (d) {
+        if (d.index !== dayIdx) return d;
+        return Object.assign({}, d, { exercises: items, warmup: warmup });
+      });
+      API.put('/plans/current', { days: newDays }).then(function () {
+        App.closeModal();
+        App.toast('这一天已保存', 'success');
+        App.refresh();
+      }).catch(function (err) {
+        if (err && err.authHandled) return;
+        App.toast(err.message || '保存失败', 'error');
       });
     });
   }

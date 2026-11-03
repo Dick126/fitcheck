@@ -660,3 +660,22 @@ body.app-auth .main { max-width: 480px; }
 }
 .member-who .hint { font-size: 12px; color: #8A93A0; }
 .circle-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+
+/* ---- 计划编辑（P0-3） ---- */
+.day-card .day-edit { margin-left: auto; }
+.ex-row {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 0.6fr 0.6fr 1.3fr auto;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.ex-row input {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #D8DEE6;
+  border-radius: 8px;
+  font-size: 13px;
+  background: #FBFCFD;
+}
+.ex-row input:focus { border-color: var(--primary); outline: none; }
