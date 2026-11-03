@@ -173,14 +173,36 @@
     const side = document.getElementById('side-nav');
     let t = '', s = '';
     NAV.forEach(function (item) {
+      const badge = item.hash === '#/circle' ? '<span class="nav-badge" data-badge="circle" hidden></span>' : '';
       t += '<a class="nav-item" data-hash="' + item.hash + '" href="' + item.hash + '">' +
-        '<span class="nav-icon">' + item.icon + '</span><span class="nav-label">' + item.label + '</span></a>';
+        '<span class="nav-icon">' + item.icon + '</span><span class="nav-label">' + item.label + '</span>' + badge + '</a>';
       s += '<a class="side-item" data-hash="' + item.hash + '" href="' + item.hash + '">' +
-        '<span class="nav-icon">' + item.icon + '</span><span>' + item.label + '</span></a>';
+        '<span class="nav-icon">' + item.icon + '</span><span>' + item.label + '</span>' + badge + '</a>';
     });
     tab.innerHTML = t;
     side.innerHTML = s;
   }
+
+  /* ---------- 未读通知角标 ---------- */
+  App.unread = 0;
+  App.setUnread = function (n) {
+    App.unread = n || 0;
+    document.querySelectorAll('[data-badge="circle"]').forEach(function (el) {
+      if (App.unread > 0) {
+        el.textContent = App.unread > 99 ? '99+' : String(App.unread);
+        el.hidden = false;
+      } else {
+        el.hidden = true;
+      }
+    });
+  };
+  App.loadUnread = function () {
+    if (!window.API.getToken()) return;
+    window.API.get('/notifications?limit=1').then(function (data) {
+      App.setUnread(data && data.unread ? data.unread : 0);
+    }).catch(function () { /* ignore */ });
+  };
+  setInterval(App.loadUnread, 60 * 1000);
 
   function highlight(hash) {
     document.querySelectorAll('.nav-item, .side-item').forEach(function (a) {
@@ -196,6 +218,7 @@
     const fn = window.Pages && window.Pages[def.page];
     if (fn) fn(container);
     else container.innerHTML = App.errorHTML('页面不存在');
+    if (def.auth !== false) App.loadUnread();
   }
 
   function route() {

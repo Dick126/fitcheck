@@ -72,6 +72,12 @@
       '<p class="hint">开启浏览器通知，到点提醒你训练。</p>' +
       '<button type="button" class="btn btn-ghost" id="notify-btn">开启浏览器通知</button>' +
       '<p class="hint" id="notify-state"></p></section>' +
+      '<section class="card"><div class="card-head"><h3>📤 数据导出</h3>' +
+      '<span class="card-sub">备份到本地</span></div>' +
+      '<div class="circle-actions">' +
+      '<button type="button" class="btn btn-ghost" id="export-checkins">导出打卡记录（CSV）</button>' +
+      '<button type="button" class="btn btn-ghost" id="export-body">导出身体数据（CSV）</button>' +
+      '</div><p class="hint">用 Excel / WPS 打开，包含全部历史记录。</p></section>' +
       '<section class="card"><div class="card-head"><h3>🔒 修改密码</h3></div>' +
       '<form id="pwd-form" class="form-grid">' +
       '<div class="field field-full"><label for="pwd-old">原密码</label>' +
@@ -140,6 +146,32 @@
         if (err && err.authHandled) return;
         App.toast(err.message || '修改失败', 'error');
       });
+    });
+
+    function downloadCSV(path, name) {
+      fetch(path, { headers: { Authorization: 'Bearer ' + API.getToken() } }).then(function (resp) {
+        if (!resp.ok) throw new Error('导出失败（' + resp.status + '）');
+        return resp.blob();
+      }).then(function (blob) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+        App.toast('已开始下载', 'success');
+      }).catch(function (err) {
+        App.toast(err.message || '导出失败', 'error');
+      });
+    }
+
+    document.getElementById('export-checkins').addEventListener('click', function () {
+      downloadCSV('/api/export/checkins.csv', 'fitcheck-checkins.csv');
+    });
+    document.getElementById('export-body').addEventListener('click', function () {
+      downloadCSV('/api/export/body.csv', 'fitcheck-body.csv');
     });
 
     document.getElementById('notify-btn').addEventListener('click', function () {

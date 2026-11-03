@@ -1,7 +1,9 @@
 """FitCheck 后端：FastAPI + SQLite。"""
 from __future__ import annotations
 
+import csv
 import hashlib
+import io
 import json
 import os
 import secrets
@@ -134,6 +136,18 @@ CREATE TABLE IF NOT EXISTS post_comments(
   post_id INTEGER NOT NULL,
   user_id INTEGER NOT NULL,
   content TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS notifications(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  type TEXT NOT NULL,
+  actor_id INTEGER,
+  circle_id INTEGER,
+  post_id INTEGER,
+  checkin_id INTEGER,
+  content TEXT DEFAULT '',
+  read INTEGER DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now','localtime'))
 );
 """
@@ -823,10 +837,13 @@ def join_circle(body: dict, authorization: str = Header(default="")):
     if not circle:
         con.close()
         raise HTTPException(404, "邀请码不存在")
-    con.execute(
+    cur = con.execute(
         "INSERT OR IGNORE INTO circle_members(circle_id, user_id, role) VALUES (?,?,?)",
         (circle["id"], user["id"], "member"),
     )
+    if cur.rowcount > 0:
+        _notify(con, circle["owner_id"], "join", user["id"], circle_id=circle["id"],
+                content=circle["name"])
     con.commit()
     con.close()
     return {"ok": True, "data": {"id": circle["id"], "name": circle["name"]}}
@@ -901,6 +918,9 @@ def remove_member(circle_id: int, target_id: int, authorization: str = Header(de
         "DELETE FROM circle_members WHERE circle_id=? AND user_id=?",
         (circle_id, target_id),
     )
+    if cur.rowcount > 0:
+        _notify(con, target_id, "kick", user["id"], circle_id=circle_id,
+                content=circle["name"])
     con.commit()
     con.close()
     if cur.rowcount == 0:
@@ -1094,6 +1114,7 @@ def like_post(post_id: int, authorization: str = Header(default="")):
         "INSERT OR IGNORE INTO post_likes(post_id, user_id) VALUES (?,?)",
         (post_id, user["id"]),
     )
+    _notify(con, post["user_id"], "like_post", user["id"], post_id=post_id)
     con.commit()
     count = con.execute("SELECT COUNT(*) FROM post_likes WHERE post_id=?", (post_id,)).fetchone()[0]
     con.close()
@@ -1133,6 +1154,7 @@ def add_comment(post_id: int, body: PostIn, authorization: str = Header(default=
         "INSERT INTO post_comments(post_id, user_id, content) VALUES (?,?,?)",
         (post_id, user["id"], content),
     )
+    _notify(con, post["user_id"], "comment", user["id"], post_id=post_id, content=content)
     con.commit()
     row = con.execute(
         "SELECT c.*, u.nickname FROM post_comments c JOIN users u ON u.id=c.user_id WHERE c.id=?",
@@ -1256,10 +1278,13 @@ def leaderboard(circle_id: int, days: int = 7, authorization: str = Header(defau
 def like_checkin(checkin_id: int, authorization: str = Header(default="")):
     user = _current(authorization)
     con = db()
+    owner = con.execute("SELECT user_id FROM checkins WHERE id=?", (checkin_id,)).fetchone()
     con.execute(
         "INSERT OR IGNORE INTO likes(checkin_id, user_id) VALUES (?,?)",
         (checkin_id, user["id"]),
     )
+    if owner:
+        _notify(con, owner["user_id"], "like_checkin", user["id"], checkin_id=checkin_id)
     con.commit()
     count = con.execute(
         "SELECT COUNT(*) FROM likes WHERE checkin_id=?", (checkin_id,)
@@ -1281,6 +1306,130 @@ def unlike_checkin(checkin_id: int, authorization: str = Header(default="")):
     ).fetchone()[0]
     con.close()
     return {"ok": True, "data": {"likes": count, "liked_by_me": False}}
+
+
+# ---------------- 通知 ----------------
+NOTIFY_TEXT = {
+    "like_checkin": "赞了你的打卡",
+    "like_post": "赞了你的帖子",
+    "comment": "评论了你的帖子",
+    "join": "加入了你的圈子",
+    "kick": "把你移出了圈子",
+}
+
+
+def _notify(con, user_id, type_, actor_id, circle_id=None, post_id=None,
+            checkin_id=None, content=""):
+    if not user_id or user_id == actor_id:
+        return
+    con.execute(
+        "INSERT INTO notifications(user_id, type, actor_id, circle_id, post_id, checkin_id, content) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (user_id, type_, actor_id, circle_id, post_id, checkin_id, (content or "")[:200]),
+    )
+
+
+@app.get("/api/notifications")
+def list_notifications(limit: int = 30, authorization: str = Header(default="")):
+    user = _current(authorization)
+    con = db()
+    rows = con.execute(
+        "SELECT n.*, u.nickname AS actor, c.name AS circle_name FROM notifications n "
+        "LEFT JOIN users u ON u.id=n.actor_id "
+        "LEFT JOIN circles c ON c.id=n.circle_id "
+        "WHERE n.user_id=? ORDER BY n.id DESC LIMIT ?",
+        (user["id"], max(1, min(limit, 100))),
+    ).fetchall()
+    unread = con.execute(
+        "SELECT COUNT(*) FROM notifications WHERE user_id=? AND read=0", (user["id"],)
+    ).fetchone()[0]
+    items = []
+    for r in rows:
+        d = dict(r)
+        d["actor"] = d.get("actor") or "系统"
+        d["text"] = NOTIFY_TEXT.get(d["type"], "有新动态")
+        items.append(d)
+    con.close()
+    return {"ok": True, "data": {"unread": unread, "items": items}}
+
+
+@app.post("/api/notifications/read")
+def read_notifications(authorization: str = Header(default="")):
+    user = _current(authorization)
+    con = db()
+    con.execute("UPDATE notifications SET read=1 WHERE user_id=? AND read=0", (user["id"],))
+    con.commit()
+    con.close()
+    return {"ok": True, "data": None}
+
+
+# ---------------- 数据导出 ----------------
+def _csv_response(rows, header, filename):
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(header)
+    for r in rows:
+        w.writerow(r)
+    return Response(
+        content=buf.getvalue().encode("utf-8-sig"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/api/export/checkins.csv")
+def export_checkins_csv(authorization: str = Header(default="")):
+    user = _current(authorization)
+    con = db()
+    rows = con.execute(
+        "SELECT * FROM checkins WHERE user_id=? ORDER BY date", (user["id"],)
+    ).fetchall()
+    con.close()
+    out = []
+    for r in rows:
+        try:
+            plan_items = json.loads(r["plan_items"] or "[]")
+        except Exception:
+            plan_items = []
+        try:
+            customs = json.loads(r["custom_items"] or "[]")
+        except Exception:
+            customs = []
+        plan_txt = "；".join(
+            f"{i.get('name', '')} {i.get('sets', '')}x{i.get('reps', '')}".strip()
+            for i in plan_items if isinstance(i, dict)
+        )
+        out.append([
+            r["date"], "已完成" if r["status"] == "done" else "未完成",
+            plan_txt, "；".join(str(c) for c in customs),
+            r["notes"] or "", r["mood"] or "", r["energy"] or "",
+            "公开" if r["visibility"] == "public" else "仅自己",
+            r["created_at"] or "",
+        ])
+    return _csv_response(
+        out,
+        ["日期", "状态", "计划动作", "自定义项目", "心得", "心情(1-5)", "精力(1-5)", "可见性", "创建时间"],
+        f"fitcheck-checkins-{date.today().isoformat()}.csv",
+    )
+
+
+@app.get("/api/export/body.csv")
+def export_body_csv(authorization: str = Header(default="")):
+    user = _current(authorization)
+    con = db()
+    rows = con.execute(
+        "SELECT * FROM body_records WHERE user_id=? ORDER BY date", (user["id"],)
+    ).fetchall()
+    con.close()
+    out = [[
+        r["date"], r["weight_kg"] or "", r["body_fat"] or "",
+        r["muscle_kg"] or "", r["waist_cm"] or "", r["note"] or "",
+    ] for r in rows]
+    return _csv_response(
+        out,
+        ["日期", "体重(kg)", "体脂率(%)", "骨骼肌(kg)", "腰围(cm)", "备注"],
+        f"fitcheck-body-{date.today().isoformat()}.csv",
+    )
 
 
 # ---------------- 统计 / 配置 ----------------

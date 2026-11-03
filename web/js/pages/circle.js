@@ -8,6 +8,7 @@
     const seq = App.beginRender();
     state.seq = seq;
     container.innerHTML =
+      '<div id="notify-box"></div>' +
       '<section class="card"><div class="card-head"><h3>👥 我的圈子</h3></div>' +
       '<div class="circle-actions">' +
       '<button type="button" class="btn btn-primary" id="circle-create">＋ 创建圈子</button>' +
@@ -52,6 +53,42 @@
 
     loadCircles();
     loadFeed();
+    loadNotify();
+
+    /* ---------- 通知 ---------- */
+    function loadNotify() {
+      API.get('/notifications?limit=20').then(function (data) {
+        if (!App.isCurrent(seq)) return;
+        const box = document.getElementById('notify-box');
+        if (!box) return;
+        const items = (data && data.items) || [];
+        const unread = (data && data.unread) || 0;
+        App.setUnread(unread);
+        if (!items.length) { box.innerHTML = ''; return; }
+        let html = '<section class="card"><div class="card-head"><h3>🔔 通知</h3>' +
+          (unread ? '<span class="card-sub">' + unread + ' 条未读</span>' : '') +
+          (unread ? '<button type="button" class="btn btn-ghost btn-mini" id="notify-read">全部已读</button>' : '') +
+          '</div><div class="notify-list">';
+        items.forEach(function (n) {
+          html += '<div class="notify-item' + (n.read ? '' : ' unread') + '">' +
+            '<span class="notify-dot"></span>' +
+            '<div class="notify-body"><span><b>' + App.esc(n.actor || '系统') + '</b> ' +
+            App.esc(n.text || '') +
+            (n.circle_name ? ' · ' + App.esc(n.circle_name) : '') + '</span>' +
+            (n.content && n.type === 'comment' ? '<p class="hint">“' + App.esc(n.content) + '”</p>' : '') +
+            '<span class="hint">' + fmtTime(n.created_at) + '</span></div></div>';
+        });
+        html += '</div></section>';
+        box.innerHTML = html;
+        const btn = document.getElementById('notify-read');
+        if (btn) btn.addEventListener('click', function () {
+          API.post('/notifications/read', {}).then(function () {
+            App.setUnread(0);
+            loadNotify();
+          }).catch(function () { /* ignore */ });
+        });
+      }).catch(function () { /* ignore */ });
+    }
 
     /* ---------- 圈子列表 ---------- */
     function loadCircles() {

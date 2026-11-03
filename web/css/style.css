@@ -712,3 +712,50 @@ body.app-auth .main { max-width: 480px; }
   border-radius: 8px;
   font-size: 13px;
 }
+
+/* ---- 通知（P1） ---- */
+.nav-badge {
+  position: absolute;
+  top: 2px;
+  right: 6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #E5484D;
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+  font-weight: 700;
+}
+.nav-item, .side-item { position: relative; }
+.notify-list { margin-top: 6px; }
+.notify-item {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 8px 0;
+  border-bottom: 1px solid #EEF0F3;
+}
+.notify-item:last-child { border-bottom: none; }
+.notify-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: transparent;
+  margin-top: 6px;
+  flex: 0 0 8px;
+}
+.notify-item.unread .notify-dot { background: #E5484D; }
+.notify-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+  color: #2A3440;
+}
+.notify-body .hint { font-size: 12px; color: #8A93A0; }
+.notify-body p { margin: 0; }
