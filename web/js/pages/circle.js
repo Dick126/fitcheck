@@ -22,6 +22,16 @@
       '<span class="card-sub">最近 14 天</span></div>' +
       '<div id="circle-feed"></div></section>';
 
+    /* 邀请链接自动填入邀请码 */
+    try {
+      const savedInvite = localStorage.getItem('fitcheck_invite');
+      const invInput = document.getElementById('circle-code');
+      if (savedInvite && invInput) {
+        invInput.value = savedInvite;
+        App.toast('已自动填入邀请码，点「加入」即可', 'success');
+      }
+    } catch (e) { /* ignore */ }
+
     document.getElementById('circle-create').addEventListener('click', function () {
       const btn = document.getElementById('circle-create');
       btn.disabled = true;
@@ -40,6 +50,7 @@
       if (!code) { App.toast('请输入邀请码', 'error'); return; }
       API.post('/circles/join', { invite_code: code }).then(function (data) {
         App.toast('已加入「' + data.name + '」', 'success');
+        try { localStorage.removeItem('fitcheck_invite'); } catch (e) { /* ignore */ }
         App.refresh();
       }).catch(function (err) {
         if (err && err.authHandled) return;
@@ -111,7 +122,8 @@
             '<b>' + App.esc(c.name || '圈子') + (c.is_owner ? ' <span class="badge badge-owner">圈主</span>' : '') + '</b>' +
             '<span class="hint">成员 ' + (c.member_count != null ? c.member_count : '—') +
             ' · 邀请码 ' + App.esc(c.invite_code || '') + '</span></div>' +
-            '<button type="button" class="btn btn-ghost btn-mini" data-copy="' + App.esc(c.invite_code || '') + '">复制</button></div>';
+            '<button type="button" class="btn btn-ghost btn-mini" data-copy="' + App.esc(c.invite_code || '') + '">复制码</button>' +
+            '<button type="button" class="btn btn-ghost btn-mini" data-link="' + App.esc(c.invite_code || '') + '">邀请链接</button></div>';
         });
         listBox.innerHTML = html;
         listBox.querySelectorAll('.circle-item').forEach(function (item) {
@@ -129,6 +141,15 @@
             const code = btn.getAttribute('data-copy');
             App.copyText(code).then(function (ok) {
               App.toast(ok ? '邀请码已复制：' + code : '复制失败，邀请码：' + code, ok ? 'success' : 'error');
+            });
+          });
+        });
+        listBox.querySelectorAll('button[data-link]').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            const code = btn.getAttribute('data-link');
+            const link = location.origin + '/?invite=' + encodeURIComponent(code);
+            App.copyText(link).then(function (ok) {
+              App.toast(ok ? '邀请链接已复制，发朋友即可' : '链接：' + link, ok ? 'success' : 'error');
             });
           });
         });
@@ -176,7 +197,7 @@
         html += '<div class="member-list">';
         members.forEach(function (m) {
           html += '<div class="member-row">' +
-            '<span class="avatar">' + App.esc(String(m.nickname || '?').slice(0, 1)) + '</span>' +
+            App.av(m.nickname, m.avatar) +
             '<div class="member-who"><b>' + App.esc(m.nickname || '圈友') + (m.is_owner ? ' 👑' : '') + '</b>' +
             '<span class="hint">' + (m.today_done ? '✅ 今日已打卡' : '⏳ 今日未打卡') + '</span></div>' +
             (isOwner && !m.is_owner
@@ -371,7 +392,7 @@
     function postCard(p, circle, meId) {
       const canDel = (p.user_id === meId) || !!circle.is_owner;
       return '<div class="post-card" data-id="' + p.id + '">' +
-        '<div class="post-head"><span class="avatar">' + App.esc(String(p.nickname || '?').slice(0, 1)) + '</span>' +
+        '<div class="post-head">' + App.av(p.nickname, p.avatar) +
         '<div class="post-who"><b>' + App.esc(p.nickname || '圈友') + '</b>' +
         '<span class="hint">' + fmtTime(p.created_at) + '</span></div>' +
         (canDel ? '<button type="button" class="btn btn-ghost btn-mini post-del" data-id="' + p.id + '">删除</button>' : '') +
@@ -394,7 +415,7 @@
         let h = '<div class="cmt-list">';
         cs.forEach(function (c) {
           const canDel = (c.user_id === meId) || !!circle.is_owner;
-          h += '<div class="cmt-row"><span class="avatar">' + App.esc(String(c.nickname || '?').slice(0, 1)) + '</span>' +
+          h += '<div class="cmt-row">' + App.av(c.nickname, c.avatar) +
             '<div class="cmt-body"><b>' + App.esc(c.nickname || '') + '</b>' +
             '<span class="hint"> ' + fmtTime(c.created_at) + '</span>' +
             (canDel ? '<button type="button" class="btn btn-ghost btn-mini cmt-del" data-id="' + c.id + '">删除</button>' : '') +

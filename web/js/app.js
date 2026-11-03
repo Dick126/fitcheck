@@ -41,6 +41,12 @@
     const t = String(s || '');
     return t.length > n ? t.slice(0, n) + '…' : t;
   };
+  /* 头像：优先用用户选择的 emoji，否则用昵称首字 */
+  App.av = function (nickname, avatar) {
+    const mark = avatar ? String(avatar).trim() : '';
+    const text = mark || String(nickname || '?').slice(0, 1);
+    return '<span class="avatar' + (mark ? ' avatar-emoji' : '') + '">' + App.esc(text) + '</span>';
+  };
 
   /* ---------- Toast 轻提示 ---------- */
   App.toast = function (msg, type) {
@@ -277,6 +283,11 @@
 
   function init() {
     buildNav();
+    /* 邀请链接：?invite=XXXX 自动带到圈子里 */
+    try {
+      const inv = new URLSearchParams(location.search).get('invite');
+      if (inv) localStorage.setItem('fitcheck_invite', inv.trim().toUpperCase());
+    } catch (e) { /* ignore */ }
     window.addEventListener('hashchange', route);
     route();
   }

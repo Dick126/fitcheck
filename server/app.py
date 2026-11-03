@@ -173,6 +173,9 @@ def init_db():
     cols = [r[1] for r in con.execute("PRAGMA table_info(circles)")]
     if "notice" not in cols:
         con.execute("ALTER TABLE circles ADD COLUMN notice TEXT DEFAULT ''")
+    cols = [r[1] for r in con.execute("PRAGMA table_info(users)")]
+    if "avatar" not in cols:
+        con.execute("ALTER TABLE users ADD COLUMN avatar TEXT DEFAULT ''")
     con.commit()
     con.close()
 
@@ -261,7 +264,7 @@ def register(body: RegisterIn):
     con.close()
     return {"ok": True, "data": {
         "token": make_token(user_id),
-        "user": {"id": user_id, "username": username, "nickname": nickname},
+        "user": {"id": user_id, "username": username, "nickname": nickname, "avatar": ""},
     }}
 
 
@@ -274,7 +277,7 @@ def login(body: LoginIn):
         raise HTTPException(401, "用户名或密码错误")
     return {"ok": True, "data": {
         "token": make_token(row["id"]),
-        "user": {"id": row["id"], "username": row["username"], "nickname": row["nickname"]},
+        "user": {"id": row["id"], "username": row["username"], "nickname": row["nickname"], "avatar": row["avatar"] or ""},
     }}
 
 
@@ -305,7 +308,7 @@ def change_password(body: ChangePasswordIn, authorization: str = Header(default=
 def me(authorization: str = Header(default="")):
     user = _current(authorization)
     return {"ok": True, "data": {"user": {
-        "id": user["id"], "username": user["username"], "nickname": user["nickname"],
+        "id": user["id"], "username": user["username"], "nickname": user["nickname"], "avatar": user["avatar"] or "",
     }}}
 
 
@@ -325,6 +328,7 @@ class ProfileIn(BaseModel):
     remind_time: str | None = None
     api_key: str | None = None
     nickname: str | None = None
+    avatar: str | None = None
 
 
 @app.get("/api/profile")
@@ -332,7 +336,7 @@ def get_profile(authorization: str = Header(default="")):
     user = _current(authorization)
     con = db()
     row = con.execute(
-        "SELECT p.*, u.nickname FROM profiles p JOIN users u ON u.id=p.user_id WHERE p.user_id=?",
+        "SELECT p.*, u.nickname, u.avatar FROM profiles p JOIN users u ON u.id=p.user_id WHERE p.user_id=?",
         (user["id"],),
     ).fetchone()
     con.close()
@@ -349,6 +353,7 @@ def put_profile(body: ProfileIn, authorization: str = Header(default="")):
     user = _current(authorization)
     payload = body.model_dump()
     nickname = payload.pop("nickname", None)
+    avatar = payload.pop("avatar", None)
     updates = {k: v for k, v in payload.items() if v is not None}
     if "api_key" in updates:
         updates["api_key"] = updates["api_key"].strip()
@@ -360,9 +365,13 @@ def put_profile(body: ProfileIn, authorization: str = Header(default="")):
             raise HTTPException(400, "昵称需 1–24 个字符")
         con.execute("UPDATE users SET nickname=? WHERE id=?", (nickname, user["id"]))
         updates["nickname"] = nickname
+    if avatar is not None:
+        avatar = avatar.strip()[:8]
+        con.execute("UPDATE users SET avatar=? WHERE id=?", (avatar, user["id"]))
+        updates["avatar"] = avatar
     if updates:
-        cols = ", ".join(f"{k}=?" for k in updates if k != "nickname")
-        values = [v for k, v in updates.items() if k != "nickname"]
+        cols = ", ".join(f"{k}=?" for k in updates if k not in ("nickname", "avatar"))
+        values = [v for k, v in updates.items() if k not in ("nickname", "avatar")]
         if cols:
             con.execute(f"UPDATE profiles SET {cols} WHERE user_id=?", (*values, user["id"]))
     con.commit()
@@ -715,13 +724,13 @@ def list_checkins(month: str = "", authorization: str = Header(default="")):
     con = db()
     if month:
         rows = con.execute(
-            "SELECT c.*, u.nickname FROM checkins c JOIN users u ON u.id=c.user_id "
+            "SELECT c.*, u.nickname, u.avatar FROM checkins c JOIN users u ON u.id=c.user_id "
             "WHERE c.user_id=? AND substr(c.date,1,7)=? ORDER BY c.date DESC, c.id DESC",
             (user["id"], month),
         ).fetchall()
     else:
         rows = con.execute(
-            "SELECT c.*, u.nickname FROM checkins c JOIN users u ON u.id=c.user_id "
+            "SELECT c.*, u.nickname, u.avatar FROM checkins c JOIN users u ON u.id=c.user_id "
             "WHERE c.user_id=? ORDER BY c.date DESC, c.id DESC LIMIT 60",
             (user["id"],),
         ).fetchall()
@@ -988,7 +997,7 @@ def circle_members(circle_id: int, authorization: str = Header(default="")):
         con.close()
         raise HTTPException(403, "你不在这个圈子里")
     rows = con.execute(
-        "SELECT u.id AS user_id, u.nickname, cm.role FROM circle_members cm "
+        "SELECT u.id AS user_id, u.nickname, u.avatar, cm.role FROM circle_members cm "
         "JOIN users u ON u.id=cm.user_id WHERE cm.circle_id=? ORDER BY cm.joined_at",
         (circle_id,),
     ).fetchall()
@@ -1002,6 +1011,7 @@ def circle_members(circle_id: int, authorization: str = Header(default="")):
         data.append({
             "user_id": r["user_id"],
             "nickname": r["nickname"],
+            "avatar": r["avatar"] or "",
             "is_owner": r["role"] == "owner",
             "today_done": bool(done),
         })
@@ -1059,7 +1069,7 @@ def add_post(circle_id: int, body: PostIn, authorization: str = Header(default="
     )
     con.commit()
     row = con.execute(
-        "SELECT p.*, u.nickname FROM posts p JOIN users u ON u.id=p.user_id WHERE p.id=?",
+        "SELECT p.*, u.nickname, u.avatar FROM posts p JOIN users u ON u.id=p.user_id WHERE p.id=?",
         (cur.lastrowid,),
     ).fetchone()
     data = _post_dict(row, con, user["id"])
@@ -1078,7 +1088,7 @@ def list_posts(circle_id: int, limit: int = 50, authorization: str = Header(defa
         con.close()
         raise HTTPException(403, "加入圈子后才能查看讨论")
     rows = con.execute(
-        "SELECT p.*, u.nickname FROM posts p JOIN users u ON u.id=p.user_id "
+        "SELECT p.*, u.nickname, u.avatar FROM posts p JOIN users u ON u.id=p.user_id "
         "WHERE p.circle_id=? ORDER BY p.id DESC LIMIT ?",
         (circle_id, max(1, min(limit, 100))),
     ).fetchall()
@@ -1167,7 +1177,7 @@ def add_comment(post_id: int, body: PostIn, authorization: str = Header(default=
     _notify(con, post["user_id"], "comment", user["id"], post_id=post_id, content=content)
     con.commit()
     row = con.execute(
-        "SELECT c.*, u.nickname FROM post_comments c JOIN users u ON u.id=c.user_id WHERE c.id=?",
+        "SELECT c.*, u.nickname, u.avatar FROM post_comments c JOIN users u ON u.id=c.user_id WHERE c.id=?",
         (cur.lastrowid,),
     ).fetchone()
     con.close()
@@ -1183,7 +1193,7 @@ def list_comments(post_id: int, authorization: str = Header(default="")):
         con.close()
         raise HTTPException(404, "帖子不存在")
     rows = con.execute(
-        "SELECT c.*, u.nickname FROM post_comments c JOIN users u ON u.id=c.user_id "
+        "SELECT c.*, u.nickname, u.avatar FROM post_comments c JOIN users u ON u.id=c.user_id "
         "WHERE c.post_id=? ORDER BY c.id",
         (post_id,),
     ).fetchall()
@@ -1220,7 +1230,7 @@ def feed(authorization: str = Header(default="")):
     user = _current(authorization)
     con = db()
     rows = con.execute(
-        "SELECT DISTINCT c.*, u.nickname FROM checkins c JOIN users u ON u.id=c.user_id "
+        "SELECT DISTINCT c.*, u.nickname, u.avatar FROM checkins c JOIN users u ON u.id=c.user_id "
         "WHERE c.visibility='public' AND c.user_id != ? "
         "AND c.date >= date('now','-14 day') "
         "AND c.user_id IN ("
@@ -1262,7 +1272,7 @@ def leaderboard(circle_id: int, days: int = 7, authorization: str = Header(defau
         con.close()
         raise HTTPException(403, "你不在这个圈子里")
     members = con.execute(
-        "SELECT u.id AS user_id, u.nickname FROM circle_members cm "
+        "SELECT u.id AS user_id, u.nickname, u.avatar FROM circle_members cm "
         "JOIN users u ON u.id=cm.user_id WHERE cm.circle_id=?",
         (circle_id,),
     ).fetchall()
@@ -1275,7 +1285,7 @@ def leaderboard(circle_id: int, days: int = 7, authorization: str = Header(defau
         ).fetchone()[0]
         data.append({
             "user_id": m["user_id"],
-            "nickname": m["nickname"],
+            "nickname": m["nickname"], "avatar": m["avatar"] or "",
             "done_count": done,
             "streak": calc_streak(con, m["user_id"]),
         })
@@ -1344,7 +1354,7 @@ def list_notifications(limit: int = 30, authorization: str = Header(default=""))
     user = _current(authorization)
     con = db()
     rows = con.execute(
-        "SELECT n.*, u.nickname AS actor, c.name AS circle_name FROM notifications n "
+        "SELECT n.*, u.nickname AS actor, u.avatar AS actor_avatar, c.name AS circle_name FROM notifications n "
         "LEFT JOIN users u ON u.id=n.actor_id "
         "LEFT JOIN circles c ON c.id=n.circle_id "
         "WHERE n.user_id=? ORDER BY n.id DESC LIMIT ?",
@@ -1443,6 +1453,20 @@ def export_body_csv(authorization: str = Header(default="")):
 
 
 # ---------------- 统计 / 配置 ----------------
+@app.get("/api/stats/heatmap")
+def heatmap(authorization: str = Header(default="")):
+    """最近 365 天打卡热力图数据：{date: done}。"""
+    user = _current(authorization)
+    con = db()
+    rows = con.execute(
+        "SELECT date, COUNT(*) AS n FROM checkins WHERE user_id=? AND status='done' "
+        "AND date >= date('now', '-366 day') GROUP BY date",
+        (user["id"],),
+    ).fetchall()
+    con.close()
+    return {"ok": True, "data": {r["date"]: r["n"] for r in rows}}
+
+
 @app.get("/api/stats")
 def stats(authorization: str = Header(default="")):
     user = _current(authorization)

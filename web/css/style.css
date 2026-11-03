@@ -759,3 +759,42 @@ body.app-auth .main { max-width: 480px; }
 }
 .notify-body .hint { font-size: 12px; color: #8A93A0; }
 .notify-body p { margin: 0; }
+
+/* ---- 头像 / 热力图（P1） ---- */
+.avatar-emoji { font-size: 18px; }
+.avatar-picker { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.avatar-opt {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid #D8DEE6;
+  background: #F7F9FB;
+  font-size: 20px;
+  cursor: pointer;
+  line-height: 1;
+}
+.avatar-opt.on { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(31, 58, 95, .15); }
+.avatar-reset { font-size: 12px; color: #667; }
+
+.heat-wrap { overflow-x: auto; padding: 6px 0; }
+.heat-grid {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, 12px);
+  grid-auto-columns: 12px;
+  gap: 3px;
+}
+.heat-cell { width: 12px; height: 12px; border-radius: 3px; background: #EBEDF0; display: inline-block; }
+.heat-1 { background: #9BE9A8; }
+.heat-2 { background: #40C463; }
+.heat-3 { background: #216E39; }
+.heat-legend {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #8A93A0;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.heat-legend i { display: inline-block; margin-right: 4px; }

@@ -33,6 +33,14 @@
       '<span><i class="dot dot-none"></i>未记录</span>' +
       '<span><i class="ring"></i>今天</span>' +
       '</div>' +
+      '</section>' +
+      '<section class="card"><div class="card-head"><h3>🔥 年度打卡热力图</h3>' +
+      '<span class="card-sub">最近一年</span></div>' +
+      '<div class="heat-wrap"><div class="heat-grid" id="heat-grid"></div></div>' +
+      '<div class="heat-legend"><span><i class="heat-cell heat-0"></i>未打卡</span>' +
+      '<span><i class="heat-cell heat-1"></i>1 次</span>' +
+      '<span><i class="heat-cell heat-2"></i>2 次</span>' +
+      '<span><i class="heat-cell heat-3"></i>3 次以上</span></div>' +
       '</section>';
 
     const grid = document.getElementById('cal-grid');
@@ -102,5 +110,33 @@
     });
 
     load();
+    loadHeat();
+
+    /* ---------- 年度热力图 ---------- */
+    function loadHeat() {
+      API.get('/stats/heatmap').then(function (map) {
+        if (state.seq !== seq) return;
+        const grid = document.getElementById('heat-grid');
+        if (!grid) return;
+        map = map || {};
+        const today = new Date();
+        const end = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+        const start = new Date(end);
+        start.setDate(start.getDate() - 364);
+        const offset = (start.getDay() + 6) % 7; /* 周一为 0 */
+        start.setDate(start.getDate() - offset);
+        let html = '';
+        const cur = new Date(start);
+        while (cur <= end) {
+          const ds = App.todayStr(cur);
+          const n = map[ds] || 0;
+          const lvl = n >= 3 ? 3 : n === 2 ? 2 : n === 1 ? 1 : 0;
+          html += '<span class="heat-cell heat-' + lvl + '" title="' + ds +
+            (n ? ' · 已打卡' : ' · 未打卡') + '"></span>';
+          cur.setDate(cur.getDate() + 1);
+        }
+        grid.innerHTML = html;
+      }).catch(function () { /* ignore */ });
+    }
   };
 })();

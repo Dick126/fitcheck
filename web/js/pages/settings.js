@@ -28,6 +28,8 @@
   function render(container, p, me) {
     const nickname = me && me.user ? me.user.nickname : '';
     const username = me && me.user ? me.user.username : '';
+    const avatar = me && me.user ? (me.user.avatar || '') : '';
+    const AVATAR_LIST = ['💪', '🏋️', '🔥', '🥇', '⚡', '🚀', '🏃', '🧘', '🥊', '🏆', '😎', '🐯'];
 
     function opt(sel, val, label) {
       return '<option value="' + val + '"' + (sel === val ? ' selected' : '') + '>' + label + '</option>';
@@ -35,9 +37,16 @@
 
     container.innerHTML =
       '<section class="card"><div class="card-head"><h3>👤 账号</h3></div>' +
-      '<div class="acc-row"><span class="avatar avatar-lg">' + App.esc(String(nickname || username || '?').slice(0, 1)) + '</span>' +
+      '<div class="acc-row">' + App.av(nickname || username, avatar) +
       '<div><b>' + App.esc(nickname || username || '') + '</b>' +
       '<p class="hint">@' + App.esc(username || '') + '</p></div></div>' +
+      '<div class="field field-full"><label>头像（点选自动保存）</label>' +
+      '<div class="avatar-picker" id="avatar-picker">' +
+      AVATAR_LIST.map(function (a) {
+        return '<button type="button" class="avatar-opt' + (a === avatar ? ' on' : '') + '" data-av="' + a + '">' + a + '</button>';
+      }).join('') +
+      '<button type="button" class="avatar-opt avatar-reset" data-av="">首字</button>' +
+      '</div></div>' +
       '<form id="nick-form" class="form-grid">' +
       '<div class="field field-full"><label for="p-nick">昵称（1–24 个字符）</label>' +
       '<input id="p-nick" maxlength="24" value="' + App.esc(nickname || '') + '"></div>' +
@@ -111,6 +120,23 @@
       }).catch(function (err) {
         if (err && err.authHandled) return;
         App.toast(err.message || '保存失败', 'error');
+      });
+    });
+
+    const picker = document.getElementById('avatar-picker');
+    picker.querySelectorAll('.avatar-opt').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const av = btn.getAttribute('data-av') || '';
+        API.put('/profile', { avatar: av }).then(function () {
+          picker.querySelectorAll('.avatar-opt').forEach(function (b) {
+            b.classList.toggle('on', b === btn);
+          });
+          App.toast('头像已更新', 'success');
+          setTimeout(function () { App.refresh(); }, 500);
+        }).catch(function (err) {
+          if (err && err.authHandled) return;
+          App.toast(err.message || '保存失败', 'error');
+        });
       });
     });
 
