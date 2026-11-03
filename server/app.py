@@ -230,6 +230,29 @@ def login(body: LoginIn):
     }}
 
 
+class ChangePasswordIn(BaseModel):
+    old_password: str
+    new_password: str
+
+
+@app.post("/api/auth/change-password")
+def change_password(body: ChangePasswordIn, authorization: str = Header(default="")):
+    user = _current(authorization)
+    if len(body.new_password) < 6:
+        raise HTTPException(400, "新密码至少 6 位")
+    if user["pw_hash"] != hash_pw(body.old_password, user["salt"]):
+        raise HTTPException(400, "原密码不正确")
+    salt = secrets.token_hex(16)
+    con = db()
+    con.execute(
+        "UPDATE users SET pw_hash=?, salt=? WHERE id=?",
+        (hash_pw(body.new_password, salt), salt, user["id"]),
+    )
+    con.commit()
+    con.close()
+    return {"ok": True, "data": None}
+
+
 @app.get("/api/auth/me")
 def me(authorization: str = Header(default="")):
     user = _current(authorization)
@@ -253,13 +276,17 @@ class ProfileIn(BaseModel):
     training_time: str | None = None
     remind_time: str | None = None
     api_key: str | None = None
+    nickname: str | None = None
 
 
 @app.get("/api/profile")
 def get_profile(authorization: str = Header(default="")):
     user = _current(authorization)
     con = db()
-    row = con.execute("SELECT * FROM profiles WHERE user_id=?", (user["id"],)).fetchone()
+    row = con.execute(
+        "SELECT p.*, u.nickname FROM profiles p JOIN users u ON u.id=p.user_id WHERE p.user_id=?",
+        (user["id"],),
+    ).fetchone()
     con.close()
     if row:
         data = {k: row[k] for k in row.keys() if k not in ("user_id", "api_key")}
@@ -273,17 +300,23 @@ def get_profile(authorization: str = Header(default="")):
 def put_profile(body: ProfileIn, authorization: str = Header(default="")):
     user = _current(authorization)
     payload = body.model_dump()
+    nickname = payload.pop("nickname", None)
     updates = {k: v for k, v in payload.items() if v is not None}
     if "api_key" in updates:
         updates["api_key"] = updates["api_key"].strip()
-    if not updates:
-        return {"ok": True, "data": {}}
-    cols = ", ".join(f"{k}=?" for k in updates)
     con = db()
-    con.execute(
-        f"UPDATE profiles SET {cols} WHERE user_id=?",
-        (*updates.values(), user["id"]),
-    )
+    if nickname is not None:
+        nickname = nickname.strip()
+        if not (1 <= len(nickname) <= 24):
+            con.close()
+            raise HTTPException(400, "昵称需 1–24 个字符")
+        con.execute("UPDATE users SET nickname=? WHERE id=?", (nickname, user["id"]))
+        updates["nickname"] = nickname
+    if updates:
+        cols = ", ".join(f"{k}=?" for k in updates if k != "nickname")
+        values = [v for k, v in updates.items() if k != "nickname"]
+        if cols:
+            con.execute(f"UPDATE profiles SET {cols} WHERE user_id=?", (*values, user["id"]))
     con.commit()
     con.close()
     return {"ok": True, "data": updates}

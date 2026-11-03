@@ -38,7 +38,11 @@
       '<div class="acc-row"><span class="avatar avatar-lg">' + App.esc(String(nickname || username || '?').slice(0, 1)) + '</span>' +
       '<div><b>' + App.esc(nickname || username || '') + '</b>' +
       '<p class="hint">@' + App.esc(username || '') + '</p></div></div>' +
-      '</section>' +
+      '<form id="nick-form" class="form-grid">' +
+      '<div class="field field-full"><label for="p-nick">昵称（1–24 个字符）</label>' +
+      '<input id="p-nick" maxlength="24" value="' + App.esc(nickname || '') + '"></div>' +
+      '<div class="field field-full"><button class="btn btn-ghost btn-block" type="submit">保存昵称</button></div>' +
+      '</form></section>' +
       '<section class="card"><div class="card-head"><h3>⚙️ 训练资料</h3>' +
       '<span class="card-sub">用于生成个性化计划</span></div>' +
       '<form id="profile-form" class="form-grid">' +
@@ -68,6 +72,16 @@
       '<p class="hint">开启浏览器通知，到点提醒你训练。</p>' +
       '<button type="button" class="btn btn-ghost" id="notify-btn">开启浏览器通知</button>' +
       '<p class="hint" id="notify-state"></p></section>' +
+      '<section class="card"><div class="card-head"><h3>🔒 修改密码</h3></div>' +
+      '<form id="pwd-form" class="form-grid">' +
+      '<div class="field field-full"><label for="pwd-old">原密码</label>' +
+      '<input id="pwd-old" type="password" autocomplete="current-password"></div>' +
+      '<div class="field field-full"><label for="pwd-new">新密码（至少 6 位）</label>' +
+      '<input id="pwd-new" type="password" autocomplete="new-password"></div>' +
+      '<div class="field field-full"><label for="pwd-new2">确认新密码</label>' +
+      '<input id="pwd-new2" type="password" autocomplete="new-password"></div>' +
+      '<div class="field field-full"><button class="btn btn-primary btn-block" type="submit">修改密码</button></div>' +
+      '</form></section>' +
       '<section class="card"><div class="card-head"><h3>🚪 账号操作</h3></div>' +
       '<button type="button" class="btn btn-danger" id="logout-btn">退出登录</button></section>' +
       '<p class="ver">FitCheck v0.1</p>';
@@ -91,6 +105,40 @@
       }).catch(function (err) {
         if (err && err.authHandled) return;
         App.toast(err.message || '保存失败', 'error');
+      });
+    });
+
+    document.getElementById('nick-form').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var nick = document.getElementById('p-nick').value.trim();
+      if (nick.length < 1 || nick.length > 24) {
+        App.toast('昵称需 1–24 个字符', 'error');
+        return;
+      }
+      API.put('/profile', { nickname: nick }).then(function () {
+        App.toast('昵称已更新', 'success');
+        if (App.profile) App.profile.nickname = nick;
+        setTimeout(function () { App.refresh(); }, 500);
+      }).catch(function (err) {
+        if (err && err.authHandled) return;
+        App.toast(err.message || '保存失败', 'error');
+      });
+    });
+
+    document.getElementById('pwd-form').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var oldP = document.getElementById('pwd-old').value;
+      var newP = document.getElementById('pwd-new').value;
+      var newP2 = document.getElementById('pwd-new2').value;
+      if (!oldP) { App.toast('请输入原密码', 'error'); return; }
+      if (newP.length < 6) { App.toast('新密码至少 6 位', 'error'); return; }
+      if (newP !== newP2) { App.toast('两次输入的新密码不一致', 'error'); return; }
+      API.post('/auth/change-password', { old_password: oldP, new_password: newP }).then(function () {
+        App.toast('密码已修改，下次用新密码登录', 'success');
+        e.target.reset();
+      }).catch(function (err) {
+        if (err && err.authHandled) return;
+        App.toast(err.message || '修改失败', 'error');
       });
     });
 
